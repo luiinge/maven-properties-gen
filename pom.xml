@@ -6,9 +6,9 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>maven-java-starter</groupId>
-        <artifactId>maven-java11-starter</artifactId>
-        <version>1.0.0</version>
+        <groupId>io.github.luiinge</groupId>
+        <artifactId>maven-java-starter</artifactId>
+        <version>11.1.0</version>
     </parent>
 
     <groupId>io.github.luiinge</groupId>

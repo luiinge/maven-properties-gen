@@ -7,7 +7,6 @@ import org.apache.maven.model.interpolation.StringSearchModelInterpolator;
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.*;
-import javax.lang.model.type.TypeMirror;
 import javax.tools.*;
 import java.io.*;
 import java.util.*;
@@ -42,29 +41,36 @@ public class PropertiesGenProcessor extends AbstractProcessor {
 
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
-        try {
-            for (Element element : roundEnv.getElementsAnnotatedWith(ProjectProperties.class)) {
-                log(NOTE,element,"Processing Maven Properties");
-                if (element.getKind() != ElementKind.INTERFACE) {
-                    log(ERROR,element,"annotation {} only accepted on interfaces", ProjectProperties.class);
-                    continue;
-                }
-                Map<String, String> properties = collectProperties(element);
-                if (properties.isEmpty()) {
-                    continue;
-                }
-                log(NOTE,element,"properties :: "+properties);
-                Map<String, Class<?>> methodTypes = collectMethodTypes(element);
-                Map<String, String> effectiveProperties = interpolateMavenProperties(properties);
-                log(NOTE,element,"interpolation :: "+effectiveProperties);
-                createStaticClass((TypeElement) element,properties,effectiveProperties,methodTypes);
-            }
-        } catch (ModelBuildingException | IOException e) {
-            log(ERROR, e.toString());
-            e.printStackTrace();
-            return false;
+        for (Element element : roundEnv.getElementsAnnotatedWith(ProjectProperties.class)) {
+            if (!processElement(element)) {
+                return false;
+           }
         }
         return true;
+    }
+
+
+    private boolean processElement(Element element) {
+        try {
+            log(NOTE, element,"Processing Maven Properties");
+            if (element.getKind() != ElementKind.INTERFACE) {
+                log(ERROR, element,"annotation {} only accepted on interfaces", ProjectProperties.class);
+                return false;
+            }
+            Map<String, String> properties = collectProperties(element);
+            if (properties.isEmpty()) {
+                return false;
+            }
+            log(NOTE, element,"properties :: "+properties);
+            Map<String, Class<?>> methodTypes = collectMethodTypes(element);
+            Map<String, String> effectiveProperties = interpolateMavenProperties(properties);
+            log(NOTE, element,"interpolation :: "+effectiveProperties);
+            createStaticClass((TypeElement) element,properties,effectiveProperties,methodTypes);
+            return true;
+        } catch (RuntimeException | IOException e) {
+            error("Unexpected exception: "+e.toString());
+            return false;
+        }
     }
 
 
@@ -77,10 +83,9 @@ public class PropertiesGenProcessor extends AbstractProcessor {
             }
             // ProjectProperty only can be used in methods
             ExecutableElement method = (ExecutableElement) child;
-            if (!validateMethod(method)) {
-                continue;
+            if (validateMethod(method)) {
+                properties.put(method.getSimpleName().toString(),property.value());
             }
-            properties.put(method.getSimpleName().toString(),property.value());
         }
         return properties;
     }
@@ -140,13 +145,13 @@ public class PropertiesGenProcessor extends AbstractProcessor {
     }
 
 
-    public Map<String,String> interpolateMavenProperties(Map<String,String> properties) throws ModelBuildingException {
+    public Map<String,String> interpolateMavenProperties(Map<String,String> properties) {
 
         File pomFile = new File("pom.xml");
         DefaultModelBuilder modelBuilder = new DefaultModelBuilderFactory().newInstance();
         var result = modelBuilder.buildRawModel(pomFile, ModelBuildingRequest.VALIDATION_LEVEL_STRICT,false);
         if (result.hasErrors()) {
-            result.getProblems().forEach(problem -> log(ERROR, problem.getMessage()));
+            result.getProblems().forEach(problem -> error(problem.getMessage()));
             return Map.of();
         }
         Model rawModel = result.get();
@@ -178,7 +183,6 @@ public class PropertiesGenProcessor extends AbstractProcessor {
         Map<String, Class<?>> methodTypes
     ) throws IOException {
 
-        TypeMirror type = element.asType();
         String namingPattern = processingEnv.getOptions().getOrDefault(OPTION_GENERATED_CLASS, "Static%s");
         String packageName = processingEnv.getElementUtils().getPackageOf(element).getQualifiedName().toString();
         packageName = processingEnv.getOptions().getOrDefault(OPTION_PACKAGE, packageName);
@@ -189,10 +193,10 @@ public class PropertiesGenProcessor extends AbstractProcessor {
         JavaFileObject file = this.processingEnv.getFiler().createSourceFile(qualifiedClassName, element);
 
         try (var writer = file.openWriter()) {
-            writer.append(String.format("package %s;\n", packageName));
+            writer.append(String.format("package %s;%n", packageName));
             writer.append("\n");
             writer.append(String.format(
-                "public final class %s implements %s {\n",
+                "public final class %s implements %s {%n",
                 className, interfaceName
             ));
             writer.append("\n");
@@ -202,7 +206,7 @@ public class PropertiesGenProcessor extends AbstractProcessor {
                 String mavenValue = "\""+property.getValue()+"\"";
                 String parser = String.format(TYPE_PARSERS.get(methodType), mavenValue);
                 writer.append(String.format(
-                    "    public static final %s %s = %s;\n",
+                    "    public static final %s %s = %s;%n",
                     methodType.getSimpleName(),
                     propertyConstant,
                     parser
@@ -215,11 +219,11 @@ public class PropertiesGenProcessor extends AbstractProcessor {
                 Class<?> methodType = methodTypes.get(propertyConstant);
                 writer.append("    @Override\n");
                 writer.append(String.format(
-                    "    public %s %s() {\n",
+                    "    public %s %s() {%n",
                     methodType.getSimpleName(),
                     javaMethod
                 ));
-                writer.append(String.format("        return %s;\n", propertyConstant));
+                writer.append(String.format("        return %s;%n", propertyConstant));
                 writer.append("    }\n");
                 writer.append("\n");
             }
@@ -253,9 +257,9 @@ public class PropertiesGenProcessor extends AbstractProcessor {
     }
 
 
-    private void log(Diagnostic.Kind kind, String message, Object... messageArgs) {
+    private void error(String message, Object... messageArgs) {
         processingEnv.getMessager().printMessage(
-            kind,
+            ERROR,
             "[propertiesgen] :: " + String.format(message.replace("{}", "%s"), messageArgs)
         );
     }

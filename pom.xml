@@ -99,13 +99,4 @@
     </build>
 
 
-    <!-- temporary, use github as maven repository -->
-    <repositories>
-        <repository>
-            <id>github</id>
-            <url>https://luiinge.github.io/maven-repo</url>
-        </repository>
-    </repositories>
-
-
 </project>

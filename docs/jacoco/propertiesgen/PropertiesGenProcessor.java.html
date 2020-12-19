@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PropertiesGenProcessor.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Maven Properties Generator</a> &gt; <a href="index.source.html" class="el_package">propertiesgen</a> &gt; <span class="el_source">PropertiesGenProcessor.java</span></div><h1>PropertiesGenProcessor.java</h1><pre class="source lang-java linenums">package propertiesgen;
+
+import org.apache.maven.model.Model;
+import org.apache.maven.model.building.*;
+import org.apache.maven.model.interpolation.StringSearchModelInterpolator;
+
+import javax.annotation.processing.*;
+import javax.lang.model.SourceVersion;
+import javax.lang.model.element.*;
+import javax.tools.*;
+import java.io.*;
+import java.util.*;
+
+import static java.util.stream.Collectors.toList;
+import static javax.tools.Diagnostic.Kind.*;
+
+@SupportedAnnotationTypes(&quot;propertiesgen.ProjectProperties&quot;)
+@SupportedSourceVersion(SourceVersion.RELEASE_11)
+<span class="fc" id="L19">public class PropertiesGenProcessor extends AbstractProcessor {</span>
+
+
+    private static final String OPTION_GENERATED_CLASS = &quot;generatedClass&quot;;
+    private static final String OPTION_PACKAGE = &quot;generatedPackage&quot;;
+
+<span class="fc" id="L25">    private static final Map&lt;Class&lt;?&gt;,String&gt; TYPE_PARSERS = Map.ofEntries(</span>
+<span class="fc" id="L26">        Map.entry(String.class, &quot;%s&quot;),</span>
+<span class="fc" id="L27">        Map.entry(byte.class, &quot;Byte.parseByte(%s)&quot;),</span>
+<span class="fc" id="L28">        Map.entry(Byte.class, &quot;Byte.valueOf(%s)&quot;),</span>
+<span class="fc" id="L29">        Map.entry(short.class, &quot;Short.parseShort(%s)&quot;),</span>
+<span class="fc" id="L30">        Map.entry(Short.class, &quot;Short.valueOf(%s)&quot;),</span>
+<span class="fc" id="L31">        Map.entry(int.class, &quot;Integer.parseInt(%s)&quot;),</span>
+<span class="fc" id="L32">        Map.entry(Integer.class, &quot;Integer.valueOf(%s)&quot;),</span>
+<span class="fc" id="L33">        Map.entry(long.class, &quot;Long.parseLong(%s)&quot;),</span>
+<span class="fc" id="L34">        Map.entry(Long.class, &quot;Long.valueOf(%s)&quot;),</span>
+<span class="fc" id="L35">        Map.entry(float.class, &quot;Float.parseFloat(%s)&quot;),</span>
+<span class="fc" id="L36">        Map.entry(Float.class, &quot;Float.valueOf(%s)&quot;),</span>
+<span class="fc" id="L37">        Map.entry(double.class, &quot;Double.parseDouble(%s)&quot;),</span>
+<span class="fc" id="L38">        Map.entry(Double.class, &quot;Double.valueOf(%s)&quot;)</span>
+    );
+
+
+    @Override
+    public boolean process(Set&lt;? extends TypeElement&gt; annotations, RoundEnvironment roundEnv) {
+<span class="fc bfc" id="L44" title="All 2 branches covered.">        for (Element element : roundEnv.getElementsAnnotatedWith(ProjectProperties.class)) {</span>
+<span class="pc bpc" id="L45" title="1 of 2 branches missed.">            if (!processElement(element)) {</span>
+<span class="nc" id="L46">                return false;</span>
+           }
+<span class="fc" id="L48">        }</span>
+<span class="fc" id="L49">        return true;</span>
+    }
+
+
+    private boolean processElement(Element element) {
+        try {
+<span class="fc" id="L55">            log(NOTE, element,&quot;Processing Maven Properties&quot;);</span>
+<span class="pc bpc" id="L56" title="1 of 2 branches missed.">            if (element.getKind() != ElementKind.INTERFACE) {</span>
+<span class="nc" id="L57">                log(ERROR, element,&quot;annotation {} only accepted on interfaces&quot;, ProjectProperties.class);</span>
+<span class="nc" id="L58">                return false;</span>
+            }
+<span class="fc" id="L60">            Map&lt;String, String&gt; properties = collectProperties(element);</span>
+<span class="pc bpc" id="L61" title="1 of 2 branches missed.">            if (properties.isEmpty()) {</span>
+<span class="nc" id="L62">                return false;</span>
+            }
+<span class="fc" id="L64">            log(NOTE, element,&quot;properties :: &quot;+properties);</span>
+<span class="fc" id="L65">            Map&lt;String, Class&lt;?&gt;&gt; methodTypes = collectMethodTypes(element);</span>
+<span class="fc" id="L66">            Map&lt;String, String&gt; effectiveProperties = interpolateMavenProperties(properties);</span>
+<span class="fc" id="L67">            log(NOTE, element,&quot;interpolation :: &quot;+effectiveProperties);</span>
+<span class="fc" id="L68">            createStaticClass((TypeElement) element,properties,effectiveProperties,methodTypes);</span>
+<span class="fc" id="L69">            return true;</span>
+<span class="nc" id="L70">        } catch (RuntimeException | IOException e) {</span>
+<span class="nc" id="L71">            error(&quot;Unexpected exception: &quot;+e.toString());</span>
+<span class="nc" id="L72">            return false;</span>
+        }
+    }
+
+
+    private Map&lt;String, String&gt; collectProperties(Element element) {
+<span class="fc" id="L78">        Map&lt;String,String&gt; properties = new LinkedHashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">        for (Element child : element.getEnclosedElements()) {</span>
+<span class="fc" id="L80">            var property = child.getAnnotation(ProjectProperty.class);</span>
+<span class="pc bpc" id="L81" title="1 of 2 branches missed.">            if (property == null) {</span>
+<span class="nc" id="L82">                continue;</span>
+            }
+            // ProjectProperty only can be used in methods
+<span class="fc" id="L85">            ExecutableElement method = (ExecutableElement) child;</span>
+<span class="pc bpc" id="L86" title="1 of 2 branches missed.">            if (validateMethod(method)) {</span>
+<span class="fc" id="L87">                properties.put(method.getSimpleName().toString(),property.value());</span>
+            }
+<span class="fc" id="L89">        }</span>
+<span class="fc" id="L90">        return properties;</span>
+    }
+
+
+    private Map&lt;String, Class&lt;?&gt;&gt; collectMethodTypes(Element element) {
+<span class="fc" id="L95">        Map&lt;String,Class&lt;?&gt;&gt; methodTypes = new LinkedHashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L96" title="All 2 branches covered.">        for (Element child : element.getEnclosedElements()) {</span>
+<span class="fc" id="L97">            var property = child.getAnnotation(ProjectProperty.class);</span>
+<span class="pc bpc" id="L98" title="1 of 2 branches missed.">            if (property == null) {</span>
+<span class="nc" id="L99">                continue;</span>
+            }
+<span class="fc" id="L101">            ExecutableElement method = (ExecutableElement) child;</span>
+<span class="fc" id="L102">            String methodName = normalize(method.getSimpleName().toString());</span>
+<span class="fc" id="L103">            Class&lt;?&gt; methodType = getClass(method);</span>
+<span class="pc bpc" id="L104" title="1 of 2 branches missed.">            if (methodType != null) {</span>
+<span class="fc" id="L105">                methodTypes.put(methodName, methodType);</span>
+            }
+<span class="fc" id="L107">        }</span>
+<span class="fc" id="L108">        return methodTypes;</span>
+    }
+
+
+    private boolean validateMethod(ExecutableElement method) {
+<span class="fc" id="L113">        boolean valid = true;</span>
+<span class="pc bpc" id="L114" title="2 of 4 branches missed.">        if (method.isDefault() || method.getModifiers().contains(Modifier.STATIC)) {</span>
+<span class="nc" id="L115">            log(</span>
+                WARNING,
+                method,
+                &quot;annotation {} ignored: only usable on non-default, non-static methods&quot;,
+                ProjectProperty.class
+            );
+<span class="nc" id="L121">            valid = false;</span>
+        }
+<span class="fc" id="L123">        Class&lt;?&gt; returnType = getClass(method);</span>
+<span class="pc bpc" id="L124" title="2 of 4 branches missed.">        if (returnType == null || !TYPE_PARSERS.containsKey(returnType)) {</span>
+<span class="nc" id="L125">            log(</span>
+                WARNING,
+                method,
+                &quot;annotation {} ignored: method return {} by only usable on methods returning one of the following: {}&quot;,
+                ProjectProperty.class,
+<span class="nc" id="L130">                method.getReturnType().toString(),</span>
+<span class="nc" id="L131">                TYPE_PARSERS.keySet().stream().map(Class::getSimpleName).collect(toList())</span>
+            );
+<span class="nc" id="L133">            valid = false;</span>
+        }
+<span class="pc bpc" id="L135" title="1 of 2 branches missed.">        if (!method.getParameters().isEmpty()) {</span>
+<span class="nc" id="L136">            log(</span>
+                WARNING,
+                method,
+                &quot;annotation {} ignored: only usable on methods with zero arguments&quot;,
+                ProjectProperty.class
+            );
+<span class="nc" id="L142">            valid = false;</span>
+        }
+<span class="fc" id="L144">        return valid;</span>
+    }
+
+
+    public Map&lt;String,String&gt; interpolateMavenProperties(Map&lt;String,String&gt; properties) {
+
+<span class="fc" id="L150">        File pomFile = new File(&quot;pom.xml&quot;);</span>
+<span class="fc" id="L151">        DefaultModelBuilder modelBuilder = new DefaultModelBuilderFactory().newInstance();</span>
+<span class="fc" id="L152">        var result = modelBuilder.buildRawModel(pomFile, ModelBuildingRequest.VALIDATION_LEVEL_STRICT,false);</span>
+<span class="pc bpc" id="L153" title="1 of 2 branches missed.">        if (result.hasErrors()) {</span>
+<span class="nc" id="L154">            result.getProblems().forEach(problem -&gt; error(problem.getMessage()));</span>
+<span class="nc" id="L155">            return Map.of();</span>
+        }
+<span class="fc" id="L157">        Model rawModel = result.get();</span>
+<span class="fc" id="L158">        properties.forEach(rawModel.getProperties()::putIfAbsent);</span>
+
+<span class="fc" id="L160">        ModelBuildingRequest request = new DefaultModelBuildingRequest()</span>
+<span class="fc" id="L161">            .setRawModel(rawModel)</span>
+<span class="fc" id="L162">            .setProcessPlugins(false)</span>
+<span class="fc" id="L163">            .setTwoPhaseBuilding(false)</span>
+        ;
+
+<span class="fc" id="L166">        var effectiveProperties = new StringSearchModelInterpolator()</span>
+<span class="fc" id="L167">            .interpolateModel(rawModel, new File(&quot;&quot;), request, null)</span>
+<span class="fc" id="L168">            .getProperties();</span>
+
+
+<span class="fc" id="L171">        Map&lt;String,String&gt; interpolatedProperties = new LinkedHashMap&lt;&gt;();</span>
+<span class="fc" id="L172">        properties.keySet().forEach(property -&gt;</span>
+<span class="fc" id="L173">            interpolatedProperties.put(property,effectiveProperties.getProperty(property, property))</span>
+        );
+<span class="fc" id="L175">        return interpolatedProperties;</span>
+    }
+
+
+    private void createStaticClass(
+        TypeElement element,
+        Map&lt;String, String&gt; methods,
+        Map&lt;String, String&gt; effectiveProperties,
+        Map&lt;String, Class&lt;?&gt;&gt; methodTypes
+    ) throws IOException {
+
+<span class="fc" id="L186">        String namingPattern = processingEnv.getOptions().getOrDefault(OPTION_GENERATED_CLASS, &quot;Static%s&quot;);</span>
+<span class="fc" id="L187">        String packageName = processingEnv.getElementUtils().getPackageOf(element).getQualifiedName().toString();</span>
+<span class="fc" id="L188">        packageName = processingEnv.getOptions().getOrDefault(OPTION_PACKAGE, packageName);</span>
+<span class="fc" id="L189">        String interfaceName = element.getSimpleName().toString();</span>
+<span class="fc" id="L190">        String className = String.format(namingPattern, interfaceName);</span>
+<span class="fc" id="L191">        String qualifiedClassName = packageName + &quot;.&quot; + className;</span>
+<span class="fc" id="L192">        log(NOTE,element,&quot;Creating implementation &quot;+qualifiedClassName);</span>
+<span class="fc" id="L193">        JavaFileObject file = this.processingEnv.getFiler().createSourceFile(qualifiedClassName, element);</span>
+
+<span class="fc" id="L195">        try (var writer = file.openWriter()) {</span>
+<span class="fc" id="L196">            writer.append(String.format(&quot;package %s;%n&quot;, packageName));</span>
+<span class="fc" id="L197">            writer.append(&quot;\n&quot;);</span>
+<span class="fc" id="L198">            writer.append(String.format(</span>
+                &quot;public final class %s implements %s {%n&quot;,
+                className, interfaceName
+            ));
+<span class="fc" id="L202">            writer.append(&quot;\n&quot;);</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">            for (var property : effectiveProperties.entrySet()) {</span>
+<span class="fc" id="L204">                String propertyConstant = normalize(property.getKey());</span>
+<span class="fc" id="L205">                Class&lt;?&gt; methodType = methodTypes.get(propertyConstant);</span>
+<span class="fc" id="L206">                String mavenValue = &quot;\&quot;&quot;+property.getValue()+&quot;\&quot;&quot;;</span>
+<span class="fc" id="L207">                String parser = String.format(TYPE_PARSERS.get(methodType), mavenValue);</span>
+<span class="fc" id="L208">                writer.append(String.format(</span>
+                    &quot;    public static final %s %s = %s;%n&quot;,
+<span class="fc" id="L210">                    methodType.getSimpleName(),</span>
+                    propertyConstant,
+                    parser
+                ));
+<span class="fc" id="L214">            }</span>
+<span class="fc" id="L215">            writer.append(&quot;\n\n&quot;);</span>
+<span class="fc bfc" id="L216" title="All 2 branches covered.">            for (var property : methods.entrySet()) {</span>
+<span class="fc" id="L217">                String javaMethod = property.getKey();</span>
+<span class="fc" id="L218">                String propertyConstant = normalize(javaMethod);</span>
+<span class="fc" id="L219">                Class&lt;?&gt; methodType = methodTypes.get(propertyConstant);</span>
+<span class="fc" id="L220">                writer.append(&quot;    @Override\n&quot;);</span>
+<span class="fc" id="L221">                writer.append(String.format(</span>
+                    &quot;    public %s %s() {%n&quot;,
+<span class="fc" id="L223">                    methodType.getSimpleName(),</span>
+                    javaMethod
+                ));
+<span class="fc" id="L226">                writer.append(String.format(&quot;        return %s;%n&quot;, propertyConstant));</span>
+<span class="fc" id="L227">                writer.append(&quot;    }\n&quot;);</span>
+<span class="fc" id="L228">                writer.append(&quot;\n&quot;);</span>
+<span class="fc" id="L229">            }</span>
+<span class="fc" id="L230">            writer.append(&quot;}\n&quot;);</span>
+        }
+<span class="fc" id="L232">    }</span>
+
+
+    private String normalize(String mavenProperty) {
+<span class="fc" id="L236">        return mavenProperty.replace('.','_').replaceAll(&quot;[A-Z]&quot;,&quot;_$0&quot;).toUpperCase();</span>
+    }
+
+
+    private Class&lt;?&gt; getClass(ExecutableElement method) {
+<span class="fc" id="L241">        String type = method.getReturnType().toString();</span>
+        Class&lt;?&gt; methodType;
+        try {
+<span class="fc" id="L244">            methodType = Class.forName(type);</span>
+<span class="fc" id="L245">        } catch (ClassNotFoundException e) {</span>
+<span class="pc bpc" id="L246" title="1 of 7 branches missed.">            switch (type) {</span>
+<span class="fc" id="L247">                case &quot;byte&quot; : methodType = byte.class; break;</span>
+<span class="fc" id="L248">                case &quot;short&quot; : methodType = short.class; break;</span>
+<span class="fc" id="L249">                case &quot;int&quot; : methodType = int.class; break;</span>
+<span class="fc" id="L250">                case &quot;long&quot; : methodType = long.class; break;</span>
+<span class="fc" id="L251">                case &quot;float&quot; : methodType = float.class; break;</span>
+<span class="fc" id="L252">                case &quot;double&quot; : methodType = double.class; break;</span>
+<span class="nc" id="L253">                default: methodType = null;</span>
+            }
+<span class="fc" id="L255">        }</span>
+<span class="fc" id="L256">        return methodType;</span>
+    }
+
+
+    private void error(String message, Object... messageArgs) {
+<span class="nc" id="L261">        processingEnv.getMessager().printMessage(</span>
+            ERROR,
+<span class="nc" id="L263">            &quot;[propertiesgen] :: &quot; + String.format(message.replace(&quot;{}&quot;, &quot;%s&quot;), messageArgs)</span>
+        );
+<span class="nc" id="L265">    }</span>
+
+
+    private void log(Diagnostic.Kind kind, Element element, String message, Object... messageArgs) {
+<span class="fc" id="L269">        processingEnv.getMessager().printMessage(</span>
+            kind,
+<span class="fc" id="L271">            &quot;[propertiesgen] at &quot; + element.getSimpleName() + &quot; :: &quot; +</span>
+<span class="fc" id="L272">                String.format(message.replace(&quot;{}&quot;, &quot;%s&quot;), messageArgs)</span>
+        );
+<span class="fc" id="L274">    }</span>
+
+
+    
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.2.201808211720</span></div></body></html>

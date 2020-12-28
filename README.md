@@ -59,8 +59,8 @@ want, annotated with `@ProjectProperty` and the Maven property identifier. For e
     ```
     
 
-- According your Maven build configuration, you may need to add the processor path in your `pom
-.xml`:
+- According your Maven build configuration, you may need to add the processor path in your `pom.xml`:
+
     ```xml
     <build>
         <plugins>
@@ -81,50 +81,7 @@ want, annotated with `@ProjectProperty` and the Maven property identifier. For e
         </plugins>
     </build>
     ```
-Alternatively, if you need static access to the Maven properties during compilation time, 
-you might have to define a `compile` goal at the `process-sources` phase and set the 
-compile parameter `proc` to `only`. This way, you would generate the output of this processor
-*before* attempting the actual compilation:
-    ```
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>${maven.compiler.version}</version>
-                <executions>
-                    <!-- pre-compile execution -->
-                    <execution>
-                        <id>generate-sources</id>
-                        <phase>process-sources</phase>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                        <configuration>
-                            <proc>only</proc>
-                            <annotationProcessorPaths>
-                                <annotationProcessorPath>
-                                    <groupId>io.github.luiinge</groupId>
-                                    <artifactId>maven-properties-gen</artifactId>
-                                    <version>${maven-properties-gen.version}</version>
-                                </annotationProcessorPath>
-                            </annotationProcessorPaths>
-                        </configuration>
-                    </execution>
-                    <!-- actual compilation -->
-                    <execution>
-                        <id>compile-default</id>
-                        <phase>compile</phase>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
-    </build>
-    ```
-
+    
 
 And that is it. After compiling, a new class would have been generated in the folder 
 `target/generated-sources/annotations`. Using the previous example, the output would be
@@ -188,6 +145,60 @@ You can customize the package and name of the generated classes with the followi
 | `generatedPackage` | enclosing package of the generated class | `%s`
 
 *being `%s` a placeholder for the original name.
+
+### Pre-compile generation
+If you need static access to the Maven properties ahead of compiling
+(for instance, if another annotation processor tries to read the static properties), 
+you might have to define a `compile` goal at the `process-sources` phase and set the 
+compile parameter `proc` to `only`. This way, you would generate the output of this processor
+*before* attempting the actual compilation:
+
+   ```xml
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven.compiler.version}</version>
+                <executions>
+                    
+                    <!-- pre-compile execution -->
+                    <execution>
+                        <id>generate-sources</id>
+                        <phase>process-sources</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <proc>only</proc>
+                            <annotationProcessorPaths>
+                                <annotationProcessorPath>
+                                    <groupId>io.github.luiinge</groupId>
+                                    <artifactId>maven-properties-gen</artifactId>
+                                    <version>${maven-properties-gen.version}</version>
+                                </annotationProcessorPath>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                    
+                    <!-- actual compilation -->
+                    <execution>
+                        <id>compile-default</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <annotationProcessorPaths>
+                                <!-- other annotation processors... -->
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+  ```
 
 Authors
 -----------------------------------------------------------------------------------------

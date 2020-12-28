@@ -81,6 +81,50 @@ want, annotated with `@ProjectProperty` and the Maven property identifier. For e
         </plugins>
     </build>
     ```
+Alternatively, if you need static access to the Maven properties during compilation time, 
+you might have to define a `compile` goal at the `process-sources` phase and set the 
+compile parameter `proc` to `only`. This way, you would generate the output of this processor
+*before* attempting the actual compilation:
+    ```
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven.compiler.version}</version>
+                <executions>
+                    <!-- pre-compile execution -->
+                    <execution>
+                        <id>generate-sources</id>
+                        <phase>process-sources</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <proc>only</proc>
+                            <annotationProcessorPaths>
+                                <annotationProcessorPath>
+                                    <groupId>io.github.luiinge</groupId>
+                                    <artifactId>maven-properties-gen</artifactId>
+                                    <version>${maven-properties-gen.version}</version>
+                                </annotationProcessorPath>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                    <!-- actual compilation -->
+                    <execution>
+                        <id>compile-default</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+    ```
+
 
 And that is it. After compiling, a new class would have been generated in the folder 
 `target/generated-sources/annotations`. Using the previous example, the output would be
